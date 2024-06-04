@@ -10,9 +10,11 @@ use neon::types::JsFunction;
 use neon::types::JsValue;
 use neon::types::Value;
 use once_cell::unsync::Lazy;
+use once_cell::sync::Lazy as LazySync;
+
+static RUNTIME: LazySync<tokio::runtime::Runtime> = LazySync::new(|| tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap());
 
 thread_local! {
-  static RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap());
   static LOCAL_SET: Lazy<tokio::task::LocalSet> = Lazy::new(|| tokio::task::LocalSet::new());
 }
 
@@ -20,17 +22,14 @@ pub fn spawn_async_local<F, R>(future: F) -> R
 where
   F: Future<Output = R>,
 {
-  // tokio runtime to execute the futures
-  RUNTIME.with(|rt| {
-    // LocalSet to spawn !Sync futures on the main thread
-    LOCAL_SET.with(|ls| {
-      // Execute the futures
-      //    Note: this still blocks the main thread until the futures
-      //          are complete. I'm hoping to find a way around this
-      rt.block_on(async move {
-        // Run the target async code
-        ls.run_until(future).await
-      })
+  // LocalSet to spawn !Sync futures on the main thread
+  LOCAL_SET.with(|ls| {
+    // Execute the futures
+    //    Note: this still blocks the main thread until the futures
+    //          are complete. I'm hoping to find a way around this
+    RUNTIME.block_on(async move {
+      // Run the target async code
+      ls.run_until(future).await
     })
   })
 }
