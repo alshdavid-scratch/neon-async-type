@@ -3,5 +3,5 @@
 resolver = "2"
 
 members = [
-    "./napi_sandbox"
+    "./napi_sandbox",
 ]
