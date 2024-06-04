@@ -26,7 +26,8 @@ async fn count_async<'a>(mut cx: FunctionContext<'a>) -> JsResult<'a, JsUndefine
 
   for i in 0..4 {
     tokio::time::sleep(Duration::from_millis(200)).await;
-    callback.call_with(&mut cx)
+    callback
+      .call_with(&mut cx)
       .arg(name)
       .arg(cx.number(i))
       .exec(&mut cx)?;

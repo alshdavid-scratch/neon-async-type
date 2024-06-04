@@ -1,4 +1,5 @@
 use std::future::Future;
+
 use neon::context::Context;
 use neon::context::FunctionContext;
 use neon::context::ModuleContext;
@@ -11,16 +12,27 @@ use neon::types::Value;
 use once_cell::unsync::Lazy;
 
 thread_local! {
-  static RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap());
+  static RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap());
   static LOCAL_SET: Lazy<tokio::task::LocalSet> = Lazy::new(|| tokio::task::LocalSet::new());
 }
 
-// This still blocks the main thread
-pub fn spawn_async<F, R>(future: F) -> R
+pub fn spawn_async_local<F, R>(future: F) -> R
 where
   F: Future<Output = R>,
 {
-  LOCAL_SET.with(|ls| RUNTIME.with(|rt| rt.block_on(async move { ls.run_until(future).await })))
+  // tokio runtime to execute the futures
+  RUNTIME.with(|rt| {
+    // LocalSet to spawn !Sync futures on the main thread
+    LOCAL_SET.with(|ls| {
+      // Execute the futures
+      //    Note: this still blocks the main thread until the futures
+      //          are complete. I'm hoping to find a way around this
+      rt.block_on(async move {
+        // Run the target async code
+        ls.run_until(future).await
+      })
+    })
+  })
 }
 
 pub fn export_function_async<'a, Func, Ret>(
@@ -32,28 +44,36 @@ where
   Func: for<'any> AsyncNeonFunction<'any, Ret> + Copy + 'static,
   Ret: Value,
 {
-  let value = JsFunction::new(cx, move |mut cx: FunctionContext| {
-    let target = JsFunction::new(&mut cx, move |cx| spawn_async(async move { f(cx).await }))?;
+  /*
+    This essentially creates:
+    export const function_name = (...args) => setTimeout(wrapped_native_async_fn, 0, ...args)
+  */
 
-    let mut callee = cx.global::<JsFunction>("setTimeout")?.call_with(&mut cx);
+  // Create a wrapper function for the incoming async function
+  let wrapper = JsFunction::new(cx, move |mut cx: FunctionContext| {
+    // Create a wrapper for the async execution
+    let target = JsFunction::new(&mut cx, move |cx| spawn_async_local(async move { f(cx).await }))?;
 
-    callee.arg(target);
-    callee.arg(cx.number(0));
+    // Run the target function within a globalThis.setTimeout(target, 0, ...args)
+    let mut set_timeout = cx.global::<JsFunction>("setTimeout")?.call_with(&mut cx);
+
+    set_timeout.arg(target);
+    set_timeout.arg(cx.number(0));
 
     let mut i = 0;
     loop {
       let Some(arg) = cx.argument_opt(i) else { break };
-      callee.arg(arg);
+      set_timeout.arg(arg);
       i += 1;
     }
 
-    callee.exec(&mut cx)?;
+    set_timeout.exec(&mut cx)?;
 
     Ok(cx.undefined())
   })?
   .upcast::<JsValue>();
 
-  cx.export_value(name, value)?;
+  cx.export_value(name, wrapper)?;
   Ok(())
 }
 
