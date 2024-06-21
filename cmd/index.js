@@ -11,8 +11,7 @@ import napi from '@workspace/napi_sandbox'
 // })
 
 // console.log('run immediately')
-// console.log('j1')
+console.log('j1')
 napi.start(() => console.log('JS called'))
-// console.log('j2')
-// await new Promise((res) => setTimeout(res, 1500))
-// console.log('j3')
+await new Promise((res) => setTimeout(res, 1000))
+console.log('j2')

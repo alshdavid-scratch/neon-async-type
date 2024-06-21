@@ -580,10 +580,8 @@ version = "0.1.0"
 dependencies = [
  "async-compat",
  "async-io",
- "bitflags 2.5.0",
  "futures",
  "libuv",
- "libuv-sys2",
  "neon",
  "once_cell",
  "smol",
@@ -596,12 +594,14 @@ version = "1.0.0"
 dependencies = [
  "getrandom",
  "libloading",
+ "libuv",
  "linkme",
  "neon-macros",
  "once_cell",
  "semver",
  "send_wrapper",
  "smallvec",
+ "smol",
 ]
 
 [[package]]

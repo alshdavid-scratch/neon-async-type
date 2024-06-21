@@ -24,7 +24,8 @@ where
     ex.spawn(async move {
       future.await;
       return ();
-    }).detach();
+    })
+    .detach();
   })
 }
 
@@ -45,13 +46,12 @@ where
   // Create a wrapper function for the incoming async function
   let wrapper = JsFunction::new(cx, move |mut cx: FunctionContext| {
     // Create a wrapper for the async execution
-    let (deferred, promise) = cx.promise();
-    
-    // spawn_async_local(async move { 
+
+
+    // spawn_async_local(async move {
     //   f(cx).await;
     // });
-
-    Ok(promise)
+    Ok(cx.undefined())
   })?
   .upcast::<JsValue>();
 
