@@ -5,8 +5,10 @@ extern crate bitflags;
 extern crate libuv_sys2 as uv;
 
 mod ok;
+mod asynch;
 use std::cell::RefCell;
 use std::mem::MaybeUninit;
+use std::pin::Pin;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -33,24 +35,20 @@ fn start(mut cx: FunctionContext) -> JsResult<JsUndefined> {
   unsafe { get_uv_event_loop(cx_ptr.clone(), result.as_mut_ptr()) };
   let ptr = unsafe { *result.as_mut_ptr() };
   let ptr = ptr as *mut uv_loop_t;
-
   let h = unsafe { libuv::r#loop::Loop::from_external(ptr) };
   let mut idle_handle = h.idle().unwrap();
-
   let ex = smol::LocalExecutor::new();
 
   let callback = cx.argument::<JsFunction>(0)?;
+  // callback.call_with(&cx).exec(&mut cx)?;
 
-  spawn_async_local(&ex, async move {
+  spawn_async_local(&ex, Box::pin(async move {
     callback.call_with(&cx).exec(&mut cx);
-  });
-  // ex.spawn(async move {
-  //   callback.call_with(&cx).exec(&mut cx);
-  //   // println!("R 1");
-  //   // Timer::after(Duration::from_secs(1)).await;
-  //   // println!("R 2");
-  //   // console_log(cx);
-  // }).detach();
+    println!("R 1");
+    Timer::after(Duration::from_secs(1)).await;
+    println!("R 2");
+    ()
+  }));
 
   idle_handle.start(move |mut idle_handle: libuv::IdleHandle| {
     if ex.is_empty() {
@@ -70,13 +68,11 @@ fn main(mut cx: ModuleContext) -> NeonResult<()> {
   Ok(())
 }
 
-pub fn spawn_async_local<F, R>(ex: &LocalExecutor, future: F)
+pub fn spawn_async_local<F>(ex: &LocalExecutor, future: Pin<Box<F>>)
 where
-  F: Future<Output = R> + 'static,
+  F: Future<Output = ()> + 'static,
 {
-  ex.spawn(async move {
-    future.await;
-  }).detach();
+  ex.spawn(future).detach();
 }
 
 // fn console_log(cx: Rc<RefCell<FunctionContext>>) -> NeonResult<()> {

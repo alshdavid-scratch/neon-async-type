@@ -10,27 +10,21 @@ use neon::types::JsFunction;
 use neon::types::JsValue;
 use neon::types::Value;
 use once_cell::unsync::Lazy;
-use once_cell::sync::Lazy as LazySync;
-
-static RUNTIME: LazySync<tokio::runtime::Runtime> = LazySync::new(|| tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap());
+use smol::LocalExecutor;
 
 thread_local! {
-  static LOCAL_SET: Lazy<tokio::task::LocalSet> = Lazy::new(|| tokio::task::LocalSet::new());
+  static EXECUTOR: Lazy<LocalExecutor<'static>> = Lazy::new(|| smol::LocalExecutor::new());
 }
 
-pub fn spawn_async_local<F, R>(future: F) -> R
+pub fn spawn_async_local<F>(future: F)
 where
-  F: Future<Output = R>,
+  F: Future<Output = ()> + 'static,
 {
-  // LocalSet to spawn !Sync futures on the main thread
-  LOCAL_SET.with(|ls| {
-    // Execute the futures
-    //    Note: this still blocks the main thread until the futures
-    //          are complete. I'm hoping to find a way around this
-    RUNTIME.block_on(async move {
-      // Run the target async code
-      ls.run_until(future).await
-    })
+  EXECUTOR.with(|ex| {
+    ex.spawn(async move {
+      future.await;
+      return ();
+    }).detach();
   })
 }
 
@@ -51,24 +45,13 @@ where
   // Create a wrapper function for the incoming async function
   let wrapper = JsFunction::new(cx, move |mut cx: FunctionContext| {
     // Create a wrapper for the async execution
-    let target = JsFunction::new(&mut cx, move |cx| spawn_async_local(async move { f(cx).await }))?;
+    let (deferred, promise) = cx.promise();
+    
+    // spawn_async_local(async move { 
+    //   f(cx).await;
+    // });
 
-    // Run the target function within a globalThis.setTimeout(target, 0, ...args)
-    let mut set_timeout = cx.global::<JsFunction>("setTimeout")?.call_with(&mut cx);
-
-    set_timeout.arg(target);
-    set_timeout.arg(cx.number(0));
-
-    let mut i = 0;
-    loop {
-      let Some(arg) = cx.argument_opt(i) else { break };
-      set_timeout.arg(arg);
-      i += 1;
-    }
-
-    set_timeout.exec(&mut cx)?;
-
-    Ok(cx.undefined())
+    Ok(promise)
   })?
   .upcast::<JsValue>();
 
