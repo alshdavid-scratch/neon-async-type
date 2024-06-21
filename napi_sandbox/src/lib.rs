@@ -1,37 +1,101 @@
-mod asynch;
+#[macro_use]
+extern crate bitflags;
 
+#[macro_use]
+extern crate libuv_sys2 as uv;
+
+mod ok;
+use std::cell::RefCell;
+use std::mem::MaybeUninit;
+use std::rc::Rc;
 use std::time::Duration;
 
-use asynch::export_function_async;
-use neon::context::Context;
-use neon::context::FunctionContext;
-use neon::context::ModuleContext;
+use futures::Future;
+use neon::context::{Context, FunctionContext, ModuleContext};
 use neon::handle::Handle;
-use neon::result::JsResult;
-use neon::result::NeonResult;
-use neon::types::JsFunction;
-use neon::types::JsString;
-use neon::types::JsUndefined;
+use neon::result::{JsResult, NeonResult};
+use neon::sys::bindings::{get_uv_event_loop, Callback};
+// use neon::sys::bindings::UvEventLoop;
+// use ok::new_executor_and_spawner;
+// use once_cell::sync::Lazy as LazySync;
+// use once_cell::unsync::Lazy;
+// use smol::{io, net, prelude::*, Unblock};
+// use async_compat::CompatExt;
+use async_io::{Async, Timer};
+use neon::types::{JsFunction, JsNumber, JsObject, JsPromise, JsUndefined};
+use neon::object::Object;
+use smol::LocalExecutor;
+use uv::{uv_idle_t, uv_loop_t};
 
-#[neon::main]
-fn main(mut cx: ModuleContext) -> NeonResult<()> {
-  export_function_async(&mut cx, "countAsync", count_async)?;
-  neon::registered().export(&mut cx)?;
-  Ok(())
-}
+fn start(mut cx: FunctionContext) -> JsResult<JsUndefined> {
+  let cx_ptr = cx.to_raw();
+  let mut result = MaybeUninit::uninit();
+  unsafe { get_uv_event_loop(cx_ptr.clone(), result.as_mut_ptr()) };
+  let ptr = unsafe { *result.as_mut_ptr() };
+  let ptr = ptr as *mut uv_loop_t;
 
-async fn count_async<'a>(mut cx: FunctionContext<'a>) -> JsResult<'a, JsUndefined> {
-  let name: Handle<JsString> = cx.argument(0)?;
-  let callback: Handle<JsFunction> = cx.argument(1)?;
+  let h = unsafe { libuv::r#loop::Loop::from_external(ptr) };
+  let mut idle_handle = h.idle().unwrap();
 
-  for i in 0..4 {
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    callback
-      .call_with(&mut cx)
-      .arg(name)
-      .arg(cx.number(i))
-      .exec(&mut cx)?;
-  }
+  let ex = smol::LocalExecutor::new();
+
+  let callback = cx.argument::<JsFunction>(0)?;
+
+  spawn_async_local(&ex, async move {
+    callback.call_with(&cx).exec(&mut cx);
+  });
+  // ex.spawn(async move {
+  //   callback.call_with(&cx).exec(&mut cx);
+  //   // println!("R 1");
+  //   // Timer::after(Duration::from_secs(1)).await;
+  //   // println!("R 2");
+  //   // console_log(cx);
+  // }).detach();
+
+  idle_handle.start(move |mut idle_handle: libuv::IdleHandle| {
+    if ex.is_empty() {
+      idle_handle.stop().unwrap();
+      return;
+    }
+    ex.try_tick();
+  }).unwrap();
+
 
   Ok(cx.undefined())
 }
+
+#[neon::main]
+fn main(mut cx: ModuleContext) -> NeonResult<()> {
+  cx.export_function("start", start)?;
+  Ok(())
+}
+
+pub fn spawn_async_local<F, R>(ex: &LocalExecutor, future: F)
+where
+  F: Future<Output = R> + 'static,
+{
+  ex.spawn(async move {
+    future.await;
+  }).detach();
+}
+
+// fn console_log(cx: Rc<RefCell<FunctionContext>>) -> NeonResult<()> {
+//   let console: Handle<JsObject> = cx.global("console")?;
+//   let log: Handle<JsFunction> = console.get(&mut *cx, "log")?;
+
+//   let v = cx.string("From Rust");
+//   log.call_with(&mut *cx).arg(v).exec(&mut *cx)?;
+//   Ok(())
+// }
+
+// fn executor(cx: &mut FunctionContext) -> LocalExecutor<'static> {
+//   let mut result = MaybeUninit::uninit();
+//   unsafe { get_uv_event_loop(cx.to_raw(), result.as_mut_ptr()) };
+//   let ptr = unsafe { *result.as_mut_ptr() };
+//   let ptr = ptr as *mut uv_loop_t;
+
+//   let mut h = libuv::r#loop::Loop::connect(ptr);
+//   let mut idle_handle = h.idle().unwrap();
+
+//   smol::LocalExecutor::new()
+// }

@@ -7,6 +7,15 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-neon = { version = "=1.1.0-alpha.0" }
+async-compat = "0.2.4"
+async-io = "2.3.3"
+bitflags = "2.5.0"
+futures = "0.3.30"
+# libuv = "2.9.0"
+libuv = { path = "../../../alshdavid-forks/libuv-rs"}
+libuv-sys2 = "1.48.0"
+# neon = { version = "=1.1.0-alpha.0" }
+neon = { path = "../../../alshdavid-forks/neon/crates/neon", features = ["sys"]}
 once_cell = "1.19.0"
+smol = "2.0.0"
 tokio = { version = "1.38.0", features = ["full"] }
