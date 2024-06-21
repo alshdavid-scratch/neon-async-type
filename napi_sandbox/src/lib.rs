@@ -14,6 +14,7 @@ use neon::types::JsString;
 use smol::Timer;
 
 async fn foo<'a>(mut cx: AsyncFunctionContext) -> JsResult<'a, JsString> {
+  
   let callback: Handle<JsFunction> = cx.argument(0)?;
   callback.call_with(&cx).exec(&mut cx)?;
   Ok(cx.string("Hi from Rust"))
