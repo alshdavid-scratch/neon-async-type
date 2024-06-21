@@ -11,7 +11,13 @@ import napi from '@workspace/napi_sandbox'
 // })
 
 // console.log('run immediately')
-console.log('j1')
-napi.start(() => console.log('JS called'))
+// console.log('j1')
+napi.foo(() => {
+  console.log(globalThis['__neon_root_cache'])
+  console.log('JS called')
+}).then(v => console.log('done', v))
+
 await new Promise((res) => setTimeout(res, 1000))
-console.log('j2')
+console.log(globalThis['__neon_root_cache'])
+
+// console.log('j2')
